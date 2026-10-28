@@ -1,0 +1,1825 @@
+Papyr.Gotz.Puppyt
+What this is
+One HTML file. No server, no dependencies, no network.
+A poseable 2D hand in the browser.
+Five fingerpieces on one wrist hub. Drag bones or joints on canvas, or use sliders.
+Save poses in this browser. Paste JSON to move them elsewhere.
+Canonical sources
+Spec doc: 1CKhcWot0YDq-HHtsem2uLG31knrrd6RFz5iH1_nIQo0 (pyxl.hand.v2, 2026-10-22)
+JSON: pyxl-papyr/handpiece/handpiece.json
+Outlines: pyxl-papyr/handpiece/Pyxl_Hand_Rig_v2_Outline.md + docs/Pyxl_Hand_Rig_v2_Outline.md
+HTML: hand-rig.2026-10-22.final.html (from phase1 → phase2 → final)
+Vocabulary
+fingerpiece = poseable finger + its metacarpal, one unit. The four bone moddle required to create a finger, tip to wrist. The finger referred to alone is just the typical finger. We might rename this later. 
+finger = the everyday finger, no metacarpal. Non-thumb: Distal + Middle + Proximal (3). Midthumb (2). The poseable finger. 
+Fingers: index, bird, ring, pinky. Bird is middle. Bird is the default; its numbers define everything. 
+-Thumb, the finger model without the middle bone, unscaled 
+-Thumbpiece: A thumb plus its metacarpal, which is half the length of the default mtacarpal and remains unscaled. 
+-Claw: A simple hand build with 1 finger and one thumb, like a hand in profile. 
+-Triedent: A three-finger build with a finger and two thumbs Defaults to a bird, a ring, and a thumb
+-Mickey’s Glove: The classic 3-finger, 1-thumb cartoon hand. Like a regular hand without the pinky. 
+
+NOTE ON FINGERS AND THUMBS.Fingerpieces are 4 piece finger models . Thumbpieces are threepiece thumb models. The finger itself is three bones. The Thumbpiece is three bones, but the thumb itself is two in our model. 
+Units
+1 pyxl = 1 square of hand = 100 px on a 2000×2000 canvas (20×20 pyxls). One scale only.
+Origin: Distal center at (0,0). Y up. X right.
+Wrist hub: bottom of Bird Metacarpal. Functional y = -7.0. Raw y = -7.5. Canvas (100x) = 1750.
+Geometry
+5.1 Bird fingerpiece (the master)
+
+Piece
+	Size
+	Center y
+	Tip y
+	Base y
+
+Distal
+	1×1
+	0
+	+0.5
+	-0.5
+
+Middle
+	1×1
+	-1
+	-0.5
+	-1.5
+
+Proximal
+	1×2
+	-2.5
+	-1.5
+	-3.5
+
+Metacarpal
+	1×4 raw, 1×3 excl
+	-5.5
+	-3.5
+	-7.5
+
+Finger (no metacarpal): 1 + 1 + 2 = 4.
+Fingerpiece raw: 4 + 4 = 8.
+Fingerpiece functional: 8 - 1 overlap = 7. That is 1 + 1 + 2 + 3 excl + 1 shared circle.
+Width: 1 uniform. Taper deferred.
+Quarter snaps allowed: 2 → 2.25 per finger. Stored as delta, not in base.
+5.2 Scaled fingerpieces (from Bird, wrist→tip including metacarpal)
+BONES = {
+  middle: [4, 2, 1, 1]
+  ring:   [3.75, 1.75, 1, 1]
+  index:  [3.5, 2, 0.75, 0.75]
+  pinky:  [3.25, 1.75, 0.75, 0.75]
+  thumb:  [2, 1, 1]  // Thumbcarpal + Midthumb + Thumbtip
+}
+SUM[d] = sum(BONES[d])
+
+Pinky one tip shorter than ring. Ring half a tip shorter than Bird. Index one tip shorter than Bird. Quarter-snapped.
+Thumb fingerpiece: 2 (finger) + 1.5 (Thumbcarpal excl) + shared = 3.5. Thumbcarpal is half the Bird Metacarpal. No Proximal.
+5.3 Joints
+Snap circle: 1 diam (0.5 radius). 0.5 into each side. Center y -3.5 between Proximal and Metacarpal. Thumb scaled 0.5 diam. Shared length. Rotates around center. Snaps to quarters 0/90/180/270. Drawn as circle outline + dot. Locked 2026-10-13.
+Seam buffers: 0.5 diam (0.25 radius). 0.25 each side. At y -0.5 (Distal-Middle) and y -1.5 (Middle-Proximal). Thumb scaled. Tolerance only, not a snap. Nests in 1×1. Inset 0.125×2. Quarter-grid. Faint outline.
+Grouping: wrist (virtual) → 5 fingerpieces. Non-thumb: Metacarpal at root beside Finger (Proximal+Middle+Distal), inside that Grip (Middle+Distal). Thumb: Thumbcarpal → Finger (Midthumb+Thumbtip) → Grip (same two). Child base sits on parent tip except snap overlap: i=1 has a=-knOvl/2, i=0 has J=knOvl, next group at top+J/2.
+5.4 View
+ViewBox: pyxl -1..+1 wide, -8..+1 tall. Pixel -100..-800 with margin. Fits 7 functional +1 margin. 8 raw also fits.
+State (exact shape)
+state = {
+  expert:  bool              // false = limits on, true = limits off
+  splay:   -100..100          // 30 default — hand splay from Bird, all fingers + thumb
+  thumb:   -100..100          // 10 default — added to hand splay for thumb only
+  fs:      {index,ring,pinky: -100..100}
+  wrist:   -180..180 deg      // full 360 about hub
+  tilt:    -30..30 deg        // Bird pointing tilt
+  o:       0 | 0.5            // knuckle overlap off / on (0 = end-to-end, 0.5 = 1 bird / 0.5 thumb)
+  wscale:  bool               // scale widths by (SUM-KN)/7 for non-thumb
+  boxes:   bool               // show palm boxes
+  cj:      {thumb,index,middle,ring,pinky: [knuckle, middle, tip] deg}
+  rot:     {thumb,index,middle,ring,pinky: deg}
+}
+6.1 Constants
+KN  = {middle:1, ring:1, index:1, pinky:1, thumb:0.5}
+LIM = {thumb:-120, index:-30, middle:0, ring:30, pinky:90}  // splay anchor deg
+knOvl      = o > 0 ? KN[d] : 0
+cRange(d)  = expert ? [-90,90] : (d=="thumb" ? [-20,80] : [-20,90])   // curl
+rRange(d)  = expert ? [-90,90] : (d=="thumb" ? [-60,60] : [-45,45])   // rotation
+A(d)       = LIM[d] * clamp(-100,100, splay + (d=="thumb"?thumb:fs[d])) / 100 + tilt + rot[d]
+wid(d)     = wscale && d!="thumb" ? (SUM[d] - KN[d]) / 7 : 1
+reach(d)   = SUM[d] - knOvl
+R          = PI / 180
+norm(a)    = ((a+540)%360) - 180
+6.2 Limits
+Curl: -20..90 (thumb 80). Rotation: ±45 (thumb ±60). Expert lifts to ±90.
+Effective splay is clamped -100..100 per finger, symmetric so any pose mirrors.
+
+----------------------------------------
+
+Here are Sections 7–9:
+
+----------------------------------------
+Pose storage
+Key: *** in localStorage. Value: JSON {name: cleanedPose}.
+Clean: num(v) for each field, rebuild cj/rot/fs via the state shape. No pre-made poses. Neutral flat is the default.
+UI: name input + Save current pose (needs name) + Delete selected + Export (textarea = JSON) + Import (parse textarea, clean each, persist).
+applyPose(k): start from def() keeping expert/o/wscale/boxes, assign clean(saved[k]) if present, then clampers + sync + draw.
+refreshPoses: rebuild select with "Neutral flat (default)" then saved keys.
+Layout
+Stage 66.667% height. Split bar 16px, ns-resize, min 20% max 85% of app height, dblclick resets to 66.667%.
+Controls: scrollable, columns 250px. Dark/light via CSS vars.
+IDs: s (svg), grid, hand, c (controls), stage, split, rd (note). Classes: hit, bone, buff, box, sock, plug, gt, gq.
+Canvas (SVG)
+9.1 What is drawn
+Palm boxes if boxes: rect -2,-4 size 4×4 plus lines at x=-1,0,1 from y -4..0.
+Per fingerpiece (order index,middle,ring,pinky,thumb): g[data-d] rotate(A(d)) wrapping chain(d, ang) where ang[k] = -ja(d,k). All wrapped in g rotate(wrist) plus wrist hub circles and hit.
+Per bone in chain: buff rect, bone rect (or capped path for last tip with r=w*0.375), then hit rect for the shaft, then if i+1<n a g translate(0, top+J/2) rotate(ang[i]) containing the next rec(i+1) plus sock/plug/hit circle.
+Shaft hit rect (the bone-drag fix):
+  rect.hit x=-w/2-0.25 y=top-0.25 width=w+0.5 height=len+0.5
+  data-d=d data-j=min(i+1, n-2)   // drives IK toward that bone's tip; full buff padding so mobile grabs
+Joint hit circle: r = max(jr, 0.3) where jr = (i==0 ? KN[d]/2 : sr) and sr = thumb?0.125:0.25, with data-j=i. Stays above the shaft hit in z-order.
+Chain math per i: len=L[i], a=(i==1 ? -knOvl/2 : 0), J=(i==0 ? knOvl : 0), top=-(a+len), bot=-a. Tip cap uses r=w*0.375.
+Guides: <g id="grid"> with lines at 1/3, 2/3 (gt) and 0.25, 0.5, 0.75 (gq).
+9.2 Pointer
+pointerdown:
+  cachedCTM = getScreenCTM().inverse() // cached for this drag
+  if data-w → drag = {type:"wrist"}
+  else if data-j is defined → drag = {type:"ik", d, k}
+  else if closest [data-d] → drag = {type:"finger", d}
+  capture pointer
+
+pointermove (RAF-throttled):
+  if no drag → return
+  if raf pending → return
+  raf = requestAnimationFrame:
+    [x,y] = toCanvas(e)  // SVGPoint + matrixTransform(cachedCTM)
+    wrist  → wrist = round(norm(atan2(x,-y)/R))
+    finger → rot[d] = round(clamp(norm(atan2(x,-y)/R - base), rRange(d)))  where base = wrist + A(d) - rot[d]
+    ik     → CCD 14 iters over j=k-1..-1, recompute jointPos each step,
+            dl = atan2(cross,dot)/R,  cj[j] -= dl clamped cRange,  rot += dl clamped rRange, then round
+    sync each; draw
+
+pointerup / pointercancel:
+  clear drag; null cachedCTM; cancel raf if any; draw to recenter
+toCanvas: SVGPoint {x:clientX, y:clientY} then matrixTransform(cachedCTM).
+jointPos(d): walk bones 0..n-2, dist = a+L[i]-J/2, accumulate x+=distsin(phiR), y-=distcos(phiR), push [x,y,phi], then phi -= ja(d,i). Start phi = wrist + A(d).
+ik(d,k,tx,ty): as above, always inside limits, then round.
+9.3 View and grid
+First #hand bounding box sets W = max(bb.w, bb.h) / 0.75.
+While drag is set, freeze viewBox at its current value.
+Otherwise recenter on bb center: x0 = bb.x+bb.w/2 - VW/2, y0 = bb.y+bb.h/2 - VH/2, set viewBox, mark gridDirty = true.
+VW/VH preserve aspect from W.
+Grid renders only when gridDirty. ResizeObserver sets gridDirty=true and draws.
+Draw is partial: first time svg.innerHTML = grid+hand, after that only #hand innerHTML. Skip getBBox while dragging.
+Controls
+Hand group: Pose select + name input + Save/Delete + Export/Import textarea. Expert unlock. Wrist -180..180°. Splay -100..100%. Bird tilt -30..30°. Toggles: Knuckle overlap, Scale widths, Show palm boxes. Buttons: Reset (def + refresh + sync + draw) and Mirror left/right (wrist,splay,thumb,tilt,rot,fs all negated).
+Per-finger groups in order: index, ring, pinky, thumb, middle. Each:
+If not middle: Splay added to hand splay -100..100%.
+Rotation -90..90 clamped to rRange.
+Curl (all joints): average of cj[0..n-2], range -20..chi where chi=80 thumb else 90.
+Details "Joint curls": Knuckle / Middle joint / Tip joint each -90..90 clamped -20..chi.
+slider() makes a range + number pair, clamp = min(expert?max:hi, max(expert?min:lo, round(v))), clampers and sync hooks keep Expert consistent.
+Footer notes: reachable lengths and the rules paragraph verbatim.
+Performance (smallest package, unchanged file size)
+SUM precomputed once. knOvl hoisted per chain/jointPos.
+R and norm hoisted.
+RAF throttle on pointermove. cachedCTM per drag.
+Draw: partial #hand update, skip getBBox while dragging, W cached, grid once via gridDirty.
+No DOM-retain rewrite. Stays single-file ~17k.
+File contract (so rebuilds stay consistent)
+One HTML file. All CSS in <style>, all JS in one <script>. No fetches, no imports, no external images.
+IDs and classes exactly as in §8 / §9. Key *** and pose shape exactly as in §7.
+Any builder following this text produces same constants, same data-j = min(i+1, n-2) shaft mapping, same limits, same RAF/cache/draw/view rules, so poses and screenshots match.
+Build log
+Phase 0 audit: bone had no data-j so shaft drag hit closest[data-d] → splay instead of IK; draw did innerHTML + getBBox + grid each move; sync/clampers double-clamped. Done 2026-10-22.
+Phase 1: shaft hit rect per bone, full buff, tip-driven IK. 16731 bytes. Done.
+Phases 2-3: smallest-package perf+cleanup. SUM, knOvl, partial draw + freeze + gridDirty, RAF + cachedCTM, jointPos hoist. Done — final.html 17255 bytes.
+Phase 4: this concept (reads like code, atomic). Paste-ready for the Doc. Push deferred to end (gog has no doc update — manual paste).
+
+----------------------------------------
+
+----------------------------------------
+
+"The top joint and bottom joint, exact center, represents the length of the invisible pyxl around it (A square, centered horizontally on long objects and vertically on wide ones."
+"The shapes represent the indo skeleton. The pyxl is the exo."
+"Joint is at the halfway point on the x of the bottom-most line."
+
+Stack — Z order (bottom → top)
+
+z=0  10×10 field (backdrop) — 1000×1000 @100px/pyxl
+     Truly invisible. Faintest blurred line only as impression.
+     Extremes may stretch to this field.
+  ↓ 1 pyxl margin
+z=1  8×8 default square — 800×800
+     Almost invisible. One ghosted step above field.
+     The hand in balanced state.
+  ↓
+z=2  In-between — reserved for future layers
+  ↓
+z=3  Mask / bone shape — indo skeleton
+     Visible. What remains when z=0 + z=1 disappear.
+
+z
+	layer
+	size
+	role
+	visibility
+
+0
+	Pyxl field (backdrop)
+	10×10 = 1000×1000
+	Exo / pinboard — per-bone pyxl squares (100×100 etc) + 10×10 field they sit on
+	Truly invisible — faintest blur
+
+1
+	8×8 default square
+	8×8 = 800×800
+	Hand — balanced centered frame
+	Almost invisible — ghosted
+
+2
+	In-between
+	—
+	Reserved
+	Optional
+
+3
+	Mask (shape)
+	100×H inside pyxl
+	Indo skeleton — bone visual
+	Visible
+
+Production: z=0 + z=1 ghosted/invisible → z=3 remains.
+Diegetic: z=0 or z=1 may appear as story element (graph paper, pinboard, framing device).
+
+Pyxl geometry
+
+1 pyxl = 100×100 square at z=0.
+Length = distance between top joint and bottom joint. Exact center between them.
+Long objects (fingers vertical): pyxl centered horizontally. Wide objects: centered vertically.
+Joint = halfway on X of bottom-most line, bottom edge. joint = (X_center, y_bottom).
+Green = small parent joint (plug, z=3 nub on isolated asset) → snaps into empty/black cutout (socket, z=3 outline) of piece below.
+Red = bottom of whole hand — metacarpal base at wrist (0,0) where all pieces meet (z=0→z=3 tie).
+
+For bone at local X0, bottom at y_base, height H (100/200/400):
+
+top_joint    = (X0, y_base − H)
+bottom_joint = (X0, y_base)                          ← halfway X, bottom edge, z=2→z=3 seam
+pyxl (z=0)   = [X0−50, X0+50] × [y_base−H, y_base]    ← H=100 → 1 square; H=200 → 2 stacked; H=400 → 4 stacked
+pyxl_center  = (X0, y_base − H/2)                     ← z=0 center
+mask (z=3)   = indo shape INSIDE pyxl, centered horizontally, bottom edge ↔ bottom_joint
+
+Origin: 0,0 at wrist — where all metacarpals meet. z=1 bottom of 8×8 / z=0 bottom of 10×10. Fingers up = −y.
+
+----------------------------------------
+II. THE PYXL — THE RULE YOU SET
+A. Backdrop & hand
+Backdrop (field, z=0) = 10×10 = 1000×1000 px @100px/pyxl (500×500 @50px/pyxl in this 2000 doc) — truly invisible. Faintest blurred line only. Extremes may stretch to this field.
+Default square (z=1) = 8×8 = 800×800 px — the hand. Almost invisible (one ghosted step above field, still not solid).
+Backdrop rect (local): x −500→+500, y −900→+100 (y up = negative; wrist 0,0 = bottom of hand square at z=1, also bottom of field at z=0, centered)
+Hand rect: x −400→+400, y −800→0 — 1 pyxl inset inside backdrop each side + top/bottom. Splayed thumb→pinky ~8.5–9 bleeds into z=0 margin toward extremes.
+       · · · · · · · · · · · · ·   y=+100 — z=0 field edge (truly invisible, faintest blur)
+        ·  ┌───────────────────┐  ·
+        ·  │ 1 pyxl margin      │  ·
+y=  0 ──●──┼── wrist (0,0) RED ─┼──●──  z=1 bottom of 8×8 default / z=0 bottom of 10×10 field
+        ·  │                    │  ·   8×8 default (z=1, almost invisible)
+        ·  │  8×8 hand (800)    │  ·   Meta400+Prox200+Mid100+Dist100 at z=3 over z=0 squares
+        ·  │                    │  ·
+y=-800 ──●──┼── tip line ───────┼──●──
+        ·  │ 1 pyxl margin      │  ·
+        ·  └───────────────────┘  ·
+        · · · · · · · · · · · · ·   y=-900 — z=0 field edge (invisible)
+           x─500  x─400    x+400  x+500
+           └─z=0 10×10 field (extremes)─┘
+             └─z=1 8×8 default ─┘
+
+B. Bone sizes — exact, W=100 uniform (perfectly balanced, all at z=3 over z=0 squares)
+bone
+	W
+	H
+	pyxels (z=0)
+	stack position (X0=0, middle)
+
+Distal / Thumbtip
+	100
+	100
+	1×1
+	y −800→−700 → joint −700 (green, z=3) → z=0 center −750
+
+Middle / Midthumb
+	100
+	100
+	1×1
+	y −700→−600 → joint −600 (green) → center −650
+
+Proximal
+	100
+	200
+	2×1
+	y −600→−400 → joint −400 (green) → center −500
+
+Metacarpal / Thumbcarpal
+	100
+	400
+	4×1
+	y −400→0 → joint 0 (RED, z=1/z=0) → center −200
+
+Hand total
+	—
+	800
+	8
+	tip −800 → wrist 0
+Rule preserved exactly: Metacarpal 400 = Prox 200 + Mid 100 + Dist 100. All W=100 in balanced state.
+Middle finger at X0=0:
+y=-800 ● tip (z=3)
+       │ Distal 100×100 over z=0 square [−50,+50]×[−800,−700]
+y=-700 ● green
+       │ Middle 100×100 over [−50,+50]×[−700,−600]
+y=-600 ● green
+       │ Proximal 100×200 (2 pyxels) over [−50,+50]×[−600,−400]
+y=-400 ● green
+       │ Metacarpal 100×400 (4 pyxels) over [−50,+50]×[−400,0]
+y=   0 ● RED wrist (0,0) — z=1/z=0
+
+C. Spawn — centered, odd + even simultaneously
+Hand width 8 inside 10 → S=2.0 pyxl (200px) z=1; exploded splayed layout S=4.0 (400px) uses z=0 margins.
+digit
+	Hand (S=2.0) X0 (pyxl)
+	Hand X0 (px)
+	Exploded (S=4.0) X0 (pyxl)
+
+pinky
+	−4.0
+	−400
+	−8.0
+
+ring
+	−2.0
+	−200
+	−4.0
+
+middle
+	0.0
+	0
+	0.0
+
+index
+	+2.0
+	+200
+	+4.0
+
+thumb
+	+4.0 (+50 half → +4.5 uses z=0 margin)
+	+400 → +450
+	+8.5
+12-sub lattice (1 pyxl = 12 sub, LCM 2/3/4/6) → center 0 is simultaneously ON-finger (odd n) and BETWEEN-fingers (even n).
+Balanced: ring/index/pinky are copies of middle — differences via creativity (imbalance at z=3) later.
+D. Scale dual
+context
+	px per pyxl
+	Distal
+	Backdrop (z=0)
+	Hand (z=1/z=3)
+
+Canonical (4000 spec)
+	100
+	100×100
+	1000×1000
+	800×800
+
+This Procreate doc (2000)
+	50
+	50×50
+	500×500
+	400×400
+E. Visibility — Z order
+Production: z=0 field + z=1 default ghosted/invisible → z=3 bone/mask remains.
+Diegetic: z=0 or z=1 may appear as story element (graph paper, pinboard, framing device).
+Imbalance via creativity — extremes stretch toward z=0 field; z=1 8×8 is the balanced state that makes both odd and even valid at 0,0.
+III. THE NUMBERS — EXACT 100 MATH (balanced state)
+A. Backdrop & hand
+Backdrop (field) = 10×10 pyxels = 1000×1000 px @100px/pyxl (500×500 @50px/pyxl in this 2000 doc) — truly invisible. Faintest blurred line only as impression. This is the field that extremes may stretch to.
+Default square = 8×8 pyxls = 800×800 px — the hand. Almost invisible (one step more visible than backdrop, still ghosted).
+Backdrop rect (local): x −500→+500, y −900→+100 (y up = negative; wrist 0,0 = bottom of hand square, center of backdrop bottom edge).
+Hand rect: x −400→+400, y −800→0 — 1 pyxl inset inside backdrop on each side + top/bottom. Splayed thumb→pinky ~8.5–9 bleeds into margin toward extremes field.
+
+        · · · · · · · · · · · · ·   y=+100 — 10×10 field edge (truly invisible, faintest blur)
+        ·  ┌───────────────────┐  ·
+        ·  │ 1 pyxl margin      │  ·
+y=  0 ──●──┼── wrist (0,0) RED ─┼──●──  all metacarpals meet = bottom of 8×8 default
+        ·  │                    │  ·   8×8 default square (almost invisible)
+        ·  │  8×8 hand (800)    │  ·   Meta400+Prox200+Mid100+Dist100
+        ·  │                    │  ·
+y=-800 ──●──┼── tip line ───────┼──●──
+        ·  │ 1 pyxl margin      │  ·
+        ·  └───────────────────┘  ·
+        · · · · · · · · · · · · ·   y=-900 — field edge (invisible)
+           x─500  x─400    x+400  x+500
+           └─10×10 field (extremes)─┘
+             └─ 8×8 default ─┘
+B. Bone sizes — exact, W=100 uniform (perfectly balanced)
+
+bone
+	W
+	H
+	pyxels
+	stack position (X0=0, middle)
+
+Distal / Thumbtip
+	100
+	100
+	1×1
+	y −800→−700 → joint −700 (green) → center −750
+
+Middle / Midthumb
+	100
+	100
+	1×1
+	y −700→−600 → joint −600 (green) → center −650
+
+Proximal
+	100
+	200
+	2×1
+	y −600→−400 → joint −400 (green) → center −500
+
+Metacarpal / Thumbcarpal
+	100
+	400
+	4×1
+	y −400→0 → joint 0 (RED) → center −200
+
+Hand total
+	—
+	800
+	8
+	tip −800 → wrist 0
+
+Rule preserved exactly: Metacarpal 400 = Prox 200 + Mid 100 + Dist 100.
+
+Middle finger example at X0=0:
+y=-800 ● tip
+       │ Distal 100×100
+y=-700 ● green
+       │ Middle 100×100
+y=-600 ● green
+       │ Proximal 100×200 (2 pyxels)
+y=-400 ● green
+       │ Metacarpal 100×400 (4 pyxels)
+y=   0 ● RED wrist
+C. Spawn — centered, odd + even simultaneously
+Hand width 8 pyxls inside 10 backdrop → uses S=2.0 pyxl (200px); exploded splayed layout uses S=4.0 (400px) in margins.
+
+digit
+	Hand (S=2.0) X0 (pyxl)
+	Hand X0 (px)
+	Exploded (S=4.0) X0 (pyxl)
+
+pinky
+	−4.0
+	−400
+	−8.0
+
+ring
+	−2.0
+	−200
+	−4.0
+
+middle
+	0.0
+	0
+	0.0
+
+index
+	+2.0
+	+200
+	+4.0
+
+thumb
+	+4.0 (+50 half → +4.5 uses margin)
+	+400 → +450
+	+8.5
+
+12-sub lattice (1 pyxl = 12 sub, LCM 2/3/4/6) → center 0 is simultaneously ON-finger (odd n) and BETWEEN-fingers (even n).
+Balanced: ring/ring/index/pinky are copies of middle — differences via creativity (imbalance) later.
+D. Scale dual
+
+context
+	px per pyxl
+	Distal
+	Backdrop
+	Hand
+
+Canonical (4000 spec)
+	100
+	100×100
+	1000×1000
+	800×800
+
+This Procreate doc (2000)
+	50
+	50×50
+	500×500
+	400×400
+
+E. Visibility
+Production: pyxl field + 8×8 default invisible/ghosted → bone/mask remains.
+Diegetic: either may appear as story element (graph paper, pinboard, framing device).
+Imbalance will come from creativity — extremes stretch toward 10×10 field; default 8×8 is the balanced centered state that makes both odd and even math valid at 0,0.
+IV. ASSETS INDEX
+canvas_outline.png — 1024×1024 thumbnail of 2000 canvas. Large outline at z=3; cutout at ~111–168 × 482–577 is the z=3 socket (empty/black). Backdrop z=0/z=1 below.
+brush_composite.png — four Shape.png stamps composited at z=3.
+3116BA74-…_Shape.png → Distal (z=3 over 100×100 z=0)
+472E2665-…_Shape.png → Middle (z=3 over 100×100 z=0)
+9A100C80-…_Shape.png → Proximal (z=3 over 100×200 z=0)
+2FDF29E8-…_Shape.png → Metacarpal (z=3 over 100×400 z=0)
+Originals at handpiece_render/ (_Shape.png + _QuickLook_Thumbnail.png + doc_Thumbnail.png) — z=0 pyxl squares implied
+
+----------------------------------------
+Gotz.Puppyt — Prototype 2 Spec Sheet (from old Doc 1i-4t5F…)
+Status: draft road map — Brad fills in his words, Bitruvi scaffolds
+P1: Prototype 1 (single-file HTML you sent 2026-10-25) — reference only
+P2: Rebuild from Brad's head, not from the code's assumptions
+
+----------------------------------------
+How to use this doc
+This is the Bible. Code follows this, not the other way around.
+Each phase = one bounded exercise. Do it, sign it off, then next.
+You write the Intent line in your own words. That's the efficacy test.
+I handle the scaffolding, versioning, and routing to the build.
+
+----------------------------------------
+Road map: 1 → 2 → 3.A–3.H → 4
++ Phase 5 (audit issues) is not a separate phase — each issue is pinned to where it gets fixed.
+
+[1] Purpose (YOUR words)
+  ↓
+[2] Canonical Rules (YOUR numbers, locked)
+  ↓
+[3.A] Stage & Interaction ─┬─ [3.B] Finger Rig
+                           ├─ [3.C] Poses
+                           ├─ [3.D] Visual
+                           ├─ [3.E] Builds
+                           ├─ [3.F] Stills
+                           ├─ [3.G] Animation
+                           └─ [3.H] State & History
+  ↓
+[4] Ship & Revise Loop (stay exactly where you want it)
+
+----------------------------------------
+
+Phase 1 — Purpose (in your words) ✅ 2026-10-25 — rev. 2026-10-25 19:51 UTC
+
+Brad's intent — verbatim (typo/punctuation only):
+
+This is a 2D cardboard cutout rig of the human hand. It comes from years of experimentation on how to transfer Lotte Reiniger's analog aesthetics to the digital age and actually pay respect to the process too, because I am tired of apps with shortcuts that make things worse, that require more knowledge of the code than the art, hidden behind paywalls that require monthly fees. That is my justification for artists using AI tools not to create their art, but to create the tools they want but do not have. Its future use cases go far beyond my own, so I simply want it viewed as this: a clean, fully rotational hand model preloaded with strong rules and constraints to keep it posing where the user wants, intuitively. A successful app is wholly poseable so that an artist could use it for reference and an animator could use it for pose-to-pose. We have the features to do certain parts of that in-app, but at this stage, posing is most important, with the exports working being our primary goal. More specifically, we want to treat the code and my lack of coding knowledge as mnemonic devices that focus less on AI as a generative tool and more as a translator of my ideas where I can feed any assets, movies, sound into it later so as not to steal from others.
+
+P1 purpose as shipped: parametric 2D hand poser, geometric not skeletal, for repeatable poses → stills/sequences.
+Not this tool if: a drawing/painting app, or a loose rig without locked limits and rules — and not an AI generator that makes the art for you.
+
+Accept: Phase 1 signed (rev). Efficacy check = does P2 pose the 5-fingerpiece cardboard hand reliably with constraints, for reference and pose-to-pose, as a tool the artist owns?
+
+Fixes from §5 here: kill the "hand poser vs drawing app" scope creep at the root — locked by Brad's words above.
+Phase 2 — Canonical Hand (lock the math)
+Gotz base is now canonical. Doc push failed (broken pipe — transient, not our file). Phase 2 below — paste only this.
+
+Where to paste in Gotz.Puppyt:
+
+Find heading Phase 2 — Canonical Hand (lock the math)
+Select that heading through the line before Phase 3.A — Stage & Interaction
+Delete that selection
+Paste this block (plain text)
+
+----------------------------------------
+
+PASTE — Phase 2 only:
+Phase 2 — Canonical Hand (lock the math) ✅ Gotz.Puppyt theflibbertigibbet/Gotz.Puppyt @040b9da — rebased 2026-10-25 23:02 UTC + Brad 23:02 UTC 6 answers
+Base: Gotz.Puppyt/src/rig/core.ts (commit 040b9da). Previous cafeetc/Pyxl.Papyr + handpiece.json archived as reference only.
+
+Units — single pyxl scale:
+1 pyxl = 100px · canvas 20×20 pyxl = 2000×2000 px · origin anchor_center · axis x right, y up
+No hand/rig dual conversion. Distal center is (0,0) anchor.
+
+BONES — as shipped in core.ts (adopted per answer 2):
+
+Digit
+BONES [M, P, Mid, D]
+SUM
+KN (23:02)
+Width wid()
+LIM
+rRange default (Controlled)
+middle (Bird master)
+[4, 2, 1, 1]
+8
+0.05
+0.75
+0
+±4°
+ring
+[3.75, 1.875, 0.9375, 0.9375]
+7.5
+0.05
+0.75×7.5/8 = 0.703
++30
+±8°
+index
+[3.75, 1.875, 0.9375, 0.9375]
+7.5
+0.05
+0.75×7.5/8 = 0.703
+−30
+±6°
+pinky
+[3.5, 1.75, 0.875, 0.875]
+7
+0.05
+0.75×7/8 = 0.656
++90
+±11°
+thumb
+[2, 1, 1, 1] (4 bones)
+5
+0.05
+0.75×0.9 = 0.675
+−120
+±75°
+
+
+KN → 0.05 all (was 1 / 0.5) — implements 5px buffer: 100px functional + 5px buffer = 105px physical per joint; split 2.5 anchor intrusion + 2.5 joint + outline remainder (Q4/Q6 geometry, kept as intent).
+wid(d) KEEP Gotz: 0.75×SUM/8 (thumb ×0.9), wscale multiplies (SUM−KN)/7 when on — answer 3.
+reach(d) = SUM − KN (e.g. middle 7.95, ring 7.45) — deductible KEEP for kinematics — answer 6.
+BEND thumb −1 else +1; cRange −20:90 (thumb 80), expert −90:90.
+rRange — default Controlled VERY RIGID ±4(mid) ±6(idx) ±8(ring) ±11(pinky) ±75(thumb); fullElasticity = free ±45 (thumb60); expert = ±90 — answer 5 via applyMetacarpalProgressiveStep.
+Chain/hub: wrist virtual bottom of Bird Metacarpal [0, −7.0] functional, all roots share it — LOCKED 2026-10-13.
+ViewBox py −1 −8 2 9 / px −100 −800 200 900.
+
+Brad’s answers ✅ 23:02 UTC (verbatim, 6 on Gotz feed):
+
+> Keep as 4.
+   → KEEP thumb 4 [2,1,1,1] SUM5.
+> Adopt the app’s.
+   → KEEP [3.75,1.875,0.9375,0.9375] SUM7.5 each.
+> Keep it as it was before.
+   → KEEP wid() 0.75×SUM/8.
+> Yes. Apply it.
+   → APPLIED KN 0.05 all.
+> Yes default controlled.
+   → default = Controlled (±4/6/8/11), fullElasticity = free, expert = ±90.
+> Keep it. Kinematics are important.
+   → KEEP SUM−KN kinematics.
+
+Accept: Phase 2 locked 23:02 UTC. Live in Gotz.Puppyt/src/rig/core.ts (KN 0.05). Earlier Q1–Q10 + .95 norm queued then dropped per answers 2/3 — see history below.
+
+<details><summary>History — earlier 22:37 UTC Q1–Q10 + intermediate .95 norm (superseded)</summary>
+
+Q1 4 2 1 1 stays. Q2 .75/.66 Q3 cut deductible Q4 100+5=105 Q5 carpal=Prox2 Q6 2.5+2.5 Q7 hub keep Q8 Controlled+10° Q9 keep limits Q10 keep units.
+Intermediate 22:43 UTC queued .95 norm [3.8,1.9,.95,.95] SUM7.6 + flat .75/.66 + splay33→10° — dropped 23:02 UTC by answers 2/3.
+</details>
+
+Fixes from §5 here: standard naming, thumb special-casing, wscale/boxes → resolved; deductible kept only for kinematics.
+
+----------------------------------------
+Phase 3.A — Stage & Interaction
+Exercise 3.A: How the hand should FEEL to drag.
+
+Your words:
+Wrist hub: _________________________________
+Finger base drag: _________________________________
+Bone/joint drag + solver: _________________________________
+Viewport framing (fit() / viewBox): _________________________________
+Split resize: keep / drop?
+
+Checklist:
+[ ] Define hit sizes (no invisible 0.5 overshoot)
+[ ] Inv matrix refreshed per move (not just pointerdown)
+[ ] Layout thrash guard (no getBBox sync on every move)
+[ ] frozen logic removed — explicit preview vs live modes
+[ ] Remove filmBlur or justify it
+[ ] Spacebar = still export — keep / change gesture?
+
+Accept: interaction spec with sizes + one "feel" sentence per handle.
+
+Fixes from §5 here: inv stale on resize, pend race, frozen brittleness, filmBlur cost, hit-target overshoot, innerHeight split calc.
+
+----------------------------------------
+Phase 3.B — Finger Rig Controls ✅ Locked & Deduplicated (2026-10-27)
+Exercise 3.B: What knobs actually need to exist.
+
+Your words & locks:
+How many ways to curl? 3 distinct access tiers:
+  1. Direct canvas drag (tip-driven IK solver)
+  2. Curl (all) master slider per finger
+  3. Joint curls collapsible drawer (3 distinct joints)
+  + Quick ±15° toolbar nudge buttons kept as non-competing step nudges.
+Which sliders survive?
+  - Wrist: Canvas hub drag + Posing Wheel widget (rotational dial + 4 snaps + embedded fine slider). All redundant secondary sliders removed.
+  - Splay: 1 Master hand splay slider in Precise Controls + per-finger splay offset sliders on index, ring, pinky, thumb.
+  - Tilt: 1 Bird tilt slider in Hand Rig drawer.
+  - Per-finger cards: Splay add (non-middle), Rotation, Curl (all), 3-joint curls, IK solver toggle.
+Expert mode:
+  - Default: Wrist ±75°, Curl -20:90 (thumb 80), Swivel baseline ±75° with progressive stiffness, pinky [-24, 28].
+  - Expert: Wrist unlocks full 360° (±180°), Curl -90:90, Swivel ±90°, pinky [-24, 90].
+
+Checklist:
+[x] Deduplicate Wrist (P1 had 4 writers) → canvas hub + Posing Wheel twin synced drivers
+[x] Deduplicate Splay (P1 had 3 + per-finger adds) → 1 master splay + 4 digit offsets (middle = 0 anchor)
+[x] Decide +15 / -15 buttons fate → kept strictly as single-click quick nudges
+[x] middle is bird/master — gets MASTER badge, highlighted card, splay disabled as kinematic root
+[x] cRange/rRange per digit locked in Phase 2/3.A, not re-derived here
+
+Accept: knob list with count. 0 redundant writers remain.
+
+Fixes from §5 here: wrist×4 reduced to 1 card + canvas; splay×3 reduced to 1 master; morph rig section removed; middle master UI established.
+
+----------------------------------------
+Phase 3.C — Pose Library
+Exercise 3.C: How poses live.
+
+Your words:
+Quick poses vs Library list — one or both? _____
+Saved pose naming rule: _____
+JSON import/export: who needs it? _____
+
+Checklist:
+[ ] Single pose picker (no Quick 8 + Library + chips triple)
+[ ] Chips All/Canonical/Custom — keep or simplify to 2?
+[ ] $name auto-Pose N collision fixed
+[ ] Delete guards canonical vs custom
+[ ] Search hit() scope decided
+
+Accept: one pose access path drawn.
+
+Fixes from §5 here: quick×library duplication, sel highlight mid-glide, auto-name collision.
+
+----------------------------------------
+Phase 3.D — Visual System
+Exercise 3.D: How it looks.
+
+Your words:
+Skin art vs boxes vs both — when? _____
+Bend arrows: what do lime/red mean to you? _____
+Theme: dark only / both? _____
+
+Checklist:
+[ ] skin vs boxes vs wscale interaction matrix written
+[ ] box rect uses CSS not dasharray attribute bug
+[ ] buff overlap rect only when art off
+[ ] Legend for bend colors in UI
+[ ] Theme button labeled (not just ☀/☾)
+
+Accept: visual mode table.
+
+Fixes from §5 here: boxes/wscale/skin mismatch, bend legend missing, theme cryptic.
+
+----------------------------------------
+Phase 3.E — Builds
+Exercise 3.E: Hand variants.
+
+Your words:
+Which builds matter? Full / Claw / Trident / Mickey's — cut any? _____
+
+Checklist:
+[ ] One picker only (header OR cycler, not both)
+[ ] IDs standard/mickey/trident/claw renamed if you want clearer
+[ ] .off dim vs hide — which?
+[ ] Mickey's label vs id consistency
+
+Accept: build list final.
+
+Fixes from §5 here: 5 build controls for 4 builds, cycler cryptic, .off still interactive.
+
+----------------------------------------
+Phase 3.F — Still Export
+Exercise 3.F: Saving a picture.
+
+Your words:
+PNG 1024² transparent — still right? _____
+SVG: who uses it? _____
+
+Checklist:
+[ ] One PNG path (Space + button converge)
+[ ] CompressionStream feature-detect, disable with message on Safari/Firefox
+[ ] measure → viewBox → render pipeline extracted, not inline
+[ ] #snaps card: Save works everywhere, Copy gated to secure context
+[ ] Filename stem single source
+
+Accept: one still export spec.
+
+Fixes from §5 here: custom PNG encoder maintenance, CompressionStream assumption, clipboard fail toast, dual PNG paths.
+
+----------------------------------------
+Phase 3.G — Pose-to-Pose Animation
+Exercise 3.G: Moving between poses.
+
+Your words:
+Filmstrip 6 frames — right count? _____
+Preview should it be destructive (commit on click) or safe? _____
+Which encoders matter? GIF / APNG / ZIP — cut any? _____
+
+Checklist:
+[ ] Filmstrip preview NON-destructive (apply on explicit commit only)
+[ ] frameIdx lifecycle defined (no overwrite + immediate commit)
+[ ] From/To defaults not jumping (Fist/Neutral)
+[ ] Duration/FPS bounds set, progress bar single source
+[ ] Memory guard: n×512² cap (warn/disable large dur×fps)
+[ ] Drop custom LZW/APNG if native toBlob covers — pick one lib
+
+Accept: animation spec with destructive/safe choice signed.
+
+Fixes from §5 here: filmstrip hijack, morph base stale, custom GIF/APNG encoders, OOM on 120 frames, gliding half-state commit.
+
+----------------------------------------
+Phase 3.H — State, History & Persistence
+Exercise 3.H: How the app remembers.
+
+Your words:
+Undo/redo — where should the buttons live? _____
+localStorage — what survives a refresh? _____
+
+Checklist:
+[ ] One undo/redo location (not header + toolbar)
+[ ] hist reducer (no mutable S god object) — commit boundaries explicit
+[ ] glide vs commit ordering: glide does NOT commit half-state on cancel
+[ ] S immutability: copy() at reducer boundary only
+[ ] sync[] pub/sub removed → explicit render pass
+[ ] localStorage key pyxl.hand.v2 versioned, *** legacy explained or dropped
+[ ] syncRev/savedRev removed — derived from state
+[ ] Keyboard: Space/Ctrl+Z gated correctly (no snap while typing), repeat ignored consistently
+
+Accept: state diagram (S → render → persist → history) drawn.
+
+Fixes from §5 here: god object S, sync[] growth/order, hist half-state, syncRev ghost, legacy *** key, keyboard bubbling, activeElement guard.
+
+----------------------------------------
+Phase 4 — Ship & Stay Where You Want It
+Exercise 4: The revision loop YOU will use.
+
+Your words:
+Where does the spec live? (this doc = Bible): _____
+How will you make P3, P4, … ? _____
+
+Loop:
+You write Intent line (your words) for the change
+Together mark which 3.x it touches, update this doc first
+Then code — one exercise at a time, bounded task
+Sign off with a screenshot/test + spec version bump
+Route assets via standard asset pipeline (Drive / cloud storage) — no parallel tracking
+
+Checklist:
+[ ] This doc is GOOGLE DOC = BIBLE source (mirror to Drive canonical)
+[ ] Version tag per phase: P2-3A, P2-3B, …
+[ ] Test gate: fit()/hit()/export proof per phase, not just "it looks right"
+[ ] Efficacy check: after each phase, can you point to the sentence YOU wrote that the code implements?
+
+Accept: loop in your words, one sentence per step.
+
+Fixes from §5 here: single-file IIFE → modular src/ (future), no tests → per-phase proof, channel routing structured properly.
+
+----------------------------------------
+Appendix — §5 Issue Map (where each fix landed)
+
+Issue
+Pinned to
+Undo/Redo ×2, Build picker ×2, Wrist/Splay/Curl dup
+3.B, 3.E, 3.H
+God object S, sync[], el/slider factories
+3.H
+handMarkup string innerHTML, getBBox thrash, frozen flag
+3.A, 3.H
+inv stale, pend race, split innerHeight
+3.A
+filmBlur cost
+3.A / 3.D
+Quick 8 + Library + Chips triple
+3.C
+Auto-name collision, sel mid-glide
+3.C, 3.H
+boxes/wscale/skin mismatch, bend legend, theme
+3.D
+5 build controls, .off interactive
+3.E
+Custom PNG/GIF encoders, CompressionStream, clipboard
+3.F, 3.G
+Filmstrip destructive preview, morph stale base
+3.G
+OOM 120 frames, glide half-state
+3.G, 3.H
+IIFE single file, legacy *** key, keyboard, split
+3.H, 4
+
+
+----------------------------------------
+Next step
+Brad: fill the YOUR P2 blanks above (one line each is enough). Reply with your Phase 1 + Phase 2 lines and I'll scaffold Phase 1 as the first bounded task.
+Papyr.Gotz.Puppyt
+What this is
+One HTML file. No server, no dependencies, no network.
+A poseable 2D hand in the browser.
+Five fingerpieces on one wrist hub. Drag bones or joints on canvas, or use sliders.
+Save poses in this browser. Paste JSON to move them elsewhere.
+Canonical sources
+Spec doc: 1CKhcWot0YDq-HHtsem2uLG31knrrd6RFz5iH1_nIQo0 (pyxl.hand.v2, 2026-10-22)
+JSON: pyxl-papyr/handpiece/handpiece.json
+Outlines: pyxl-papyr/handpiece/Pyxl_Hand_Rig_v2_Outline.md + docs/Pyxl_Hand_Rig_v2_Outline.md
+HTML: hand-rig.2026-10-22.final.html (from phase1 → phase2 → final)
+Vocabulary
+fingerpiece = poseable finger + its metacarpal, one unit. The four bone moddle required to create a finger, tip to wrist. The finger referred to alone is just the typical finger. We might rename this later. 
+finger = the everyday finger, no metacarpal. Non-thumb: Distal + Middle + Proximal (3). Midthumb (2). The poseable finger. 
+Fingers: index, bird, ring, pinky. Bird is middle. Bird is the default; its numbers define everything. 
+-Thumb, the finger model without the middle bone, unscaled 
+-Thumbpiece: A thumb plus its metacarpal, which is half the length of the default mtacarpal and remains unscaled. 
+-Claw: A simple hand build with 1 finger and one thumb, like a hand in profile. 
+-Triedent: A three-finger build with a finger and two thumbs Defaults to a bird, a ring, and a thumb
+-Mickey’s Glove: The classic 3-finger, 1-thumb cartoon hand. Like a regular hand without the pinky. 
+
+NOTE ON FINGERS AND THUMBS.Fingerpieces are 4 piece finger models . Thumbpieces are threepiece thumb models. The finger itself is three bones. The Thumbpiece is three bones, but the thumb itself is two in our model. 
+Units
+1 pyxl = 1 square of hand = 100 px on a 2000×2000 canvas (20×20 pyxls). One scale only.
+Origin: Distal center at (0,0). Y up. X right.
+Wrist hub: bottom of Bird Metacarpal. Functional y = -7.0. Raw y = -7.5. Canvas (100x) = 1750.
+Geometry
+5.1 Bird fingerpiece (the master)
+
+Piece
+	Size
+	Center y
+	Tip y
+	Base y
+
+Distal
+	1×1
+	0
+	+0.5
+	-0.5
+
+Middle
+	1×1
+	-1
+	-0.5
+	-1.5
+
+Proximal
+	1×2
+	-2.5
+	-1.5
+	-3.5
+
+Metacarpal
+	1×4 raw, 1×3 excl
+	-5.5
+	-3.5
+	-7.5
+
+Finger (no metacarpal): 1 + 1 + 2 = 4.
+Fingerpiece raw: 4 + 4 = 8.
+Fingerpiece functional: 8 - 1 overlap = 7. That is 1 + 1 + 2 + 3 excl + 1 shared circle.
+Width: 1 uniform. Taper deferred.
+Quarter snaps allowed: 2 → 2.25 per finger. Stored as delta, not in base.
+5.2 Scaled fingerpieces (from Bird, wrist→tip including metacarpal)
+BONES = {
+  middle: [4, 2, 1, 1]
+  ring:   [3.75, 1.75, 1, 1]
+  index:  [3.5, 2, 0.75, 0.75]
+  pinky:  [3.25, 1.75, 0.75, 0.75]
+  thumb:  [2, 1, 1]  // Thumbcarpal + Midthumb + Thumbtip
+}
+SUM[d] = sum(BONES[d])
+
+Pinky one tip shorter than ring. Ring half a tip shorter than Bird. Index one tip shorter than Bird. Quarter-snapped.
+Thumb fingerpiece: 2 (finger) + 1.5 (Thumbcarpal excl) + shared = 3.5. Thumbcarpal is half the Bird Metacarpal. No Proximal.
+5.3 Joints
+Snap circle: 1 diam (0.5 radius). 0.5 into each side. Center y -3.5 between Proximal and Metacarpal. Thumb scaled 0.5 diam. Shared length. Rotates around center. Snaps to quarters 0/90/180/270. Drawn as circle outline + dot. Locked 2026-10-13.
+Seam buffers: 0.5 diam (0.25 radius). 0.25 each side. At y -0.5 (Distal-Middle) and y -1.5 (Middle-Proximal). Thumb scaled. Tolerance only, not a snap. Nests in 1×1. Inset 0.125×2. Quarter-grid. Faint outline.
+Grouping: wrist (virtual) → 5 fingerpieces. Non-thumb: Metacarpal at root beside Finger (Proximal+Middle+Distal), inside that Grip (Middle+Distal). Thumb: Thumbcarpal → Finger (Midthumb+Thumbtip) → Grip (same two). Child base sits on parent tip except snap overlap: i=1 has a=-knOvl/2, i=0 has J=knOvl, next group at top+J/2.
+5.4 View
+ViewBox: pyxl -1..+1 wide, -8..+1 tall. Pixel -100..-800 with margin. Fits 7 functional +1 margin. 8 raw also fits.
+State (exact shape)
+state = {
+  expert:  bool              // false = limits on, true = limits off
+  splay:   -100..100          // 30 default — hand splay from Bird, all fingers + thumb
+  thumb:   -100..100          // 10 default — added to hand splay for thumb only
+  fs:      {index,ring,pinky: -100..100}
+  wrist:   -180..180 deg      // full 360 about hub
+  tilt:    -30..30 deg        // Bird pointing tilt
+  o:       0 | 0.5            // knuckle overlap off / on (0 = end-to-end, 0.5 = 1 bird / 0.5 thumb)
+  wscale:  bool               // scale widths by (SUM-KN)/7 for non-thumb
+  boxes:   bool               // show palm boxes
+  cj:      {thumb,index,middle,ring,pinky: [knuckle, middle, tip] deg}
+  rot:     {thumb,index,middle,ring,pinky: deg}
+}
+6.1 Constants
+KN  = {middle:1, ring:1, index:1, pinky:1, thumb:0.5}
+LIM = {thumb:-120, index:-30, middle:0, ring:30, pinky:90}  // splay anchor deg
+knOvl      = o > 0 ? KN[d] : 0
+cRange(d)  = expert ? [-90,90] : (d=="thumb" ? [-20,80] : [-20,90])   // curl
+rRange(d)  = expert ? [-90,90] : (d=="thumb" ? [-60,60] : [-45,45])   // rotation
+A(d)       = LIM[d] * clamp(-100,100, splay + (d=="thumb"?thumb:fs[d])) / 100 + tilt + rot[d]
+wid(d)     = wscale && d!="thumb" ? (SUM[d] - KN[d]) / 7 : 1
+reach(d)   = SUM[d] - knOvl
+R          = PI / 180
+norm(a)    = ((a+540)%360) - 180
+6.2 Limits
+Curl: -20..90 (thumb 80). Rotation: ±45 (thumb ±60). Expert lifts to ±90.
+Effective splay is clamped -100..100 per finger, symmetric so any pose mirrors.
+
+----------------------------------------
+
+Here are Sections 7–9:
+
+----------------------------------------
+Pose storage
+Key: *** in localStorage. Value: JSON {name: cleanedPose}.
+Clean: num(v) for each field, rebuild cj/rot/fs via the state shape. No pre-made poses. Neutral flat is the default.
+UI: name input + Save current pose (needs name) + Delete selected + Export (textarea = JSON) + Import (parse textarea, clean each, persist).
+applyPose(k): start from def() keeping expert/o/wscale/boxes, assign clean(saved[k]) if present, then clampers + sync + draw.
+refreshPoses: rebuild select with "Neutral flat (default)" then saved keys.
+Layout
+Stage 66.667% height. Split bar 16px, ns-resize, min 20% max 85% of app height, dblclick resets to 66.667%.
+Controls: scrollable, columns 250px. Dark/light via CSS vars.
+IDs: s (svg), grid, hand, c (controls), stage, split, rd (note). Classes: hit, bone, buff, box, sock, plug, gt, gq.
+Canvas (SVG)
+9.1 What is drawn
+Palm boxes if boxes: rect -2,-4 size 4×4 plus lines at x=-1,0,1 from y -4..0.
+Per fingerpiece (order index,middle,ring,pinky,thumb): g[data-d] rotate(A(d)) wrapping chain(d, ang) where ang[k] = -ja(d,k). All wrapped in g rotate(wrist) plus wrist hub circles and hit.
+Per bone in chain: buff rect, bone rect (or capped path for last tip with r=w*0.375), then hit rect for the shaft, then if i+1<n a g translate(0, top+J/2) rotate(ang[i]) containing the next rec(i+1) plus sock/plug/hit circle.
+Shaft hit rect (the bone-drag fix):
+  rect.hit x=-w/2-0.25 y=top-0.25 width=w+0.5 height=len+0.5
+  data-d=d data-j=min(i+1, n-2)   // drives IK toward that bone's tip; full buff padding so mobile grabs
+Joint hit circle: r = max(jr, 0.3) where jr = (i==0 ? KN[d]/2 : sr) and sr = thumb?0.125:0.25, with data-j=i. Stays above the shaft hit in z-order.
+Chain math per i: len=L[i], a=(i==1 ? -knOvl/2 : 0), J=(i==0 ? knOvl : 0), top=-(a+len), bot=-a. Tip cap uses r=w*0.375.
+Guides: <g id="grid"> with lines at 1/3, 2/3 (gt) and 0.25, 0.5, 0.75 (gq).
+9.2 Pointer
+pointerdown:
+  cachedCTM = getScreenCTM().inverse() // cached for this drag
+  if data-w → drag = {type:"wrist"}
+  else if data-j is defined → drag = {type:"ik", d, k}
+  else if closest [data-d] → drag = {type:"finger", d}
+  capture pointer
+
+pointermove (RAF-throttled):
+  if no drag → return
+  if raf pending → return
+  raf = requestAnimationFrame:
+    [x,y] = toCanvas(e)  // SVGPoint + matrixTransform(cachedCTM)
+    wrist  → wrist = round(norm(atan2(x,-y)/R))
+    finger → rot[d] = round(clamp(norm(atan2(x,-y)/R - base), rRange(d)))  where base = wrist + A(d) - rot[d]
+    ik     → CCD 14 iters over j=k-1..-1, recompute jointPos each step,
+            dl = atan2(cross,dot)/R,  cj[j] -= dl clamped cRange,  rot += dl clamped rRange, then round
+    sync each; draw
+
+pointerup / pointercancel:
+  clear drag; null cachedCTM; cancel raf if any; draw to recenter
+toCanvas: SVGPoint {x:clientX, y:clientY} then matrixTransform(cachedCTM).
+jointPos(d): walk bones 0..n-2, dist = a+L[i]-J/2, accumulate x+=distsin(phiR), y-=distcos(phiR), push [x,y,phi], then phi -= ja(d,i). Start phi = wrist + A(d).
+ik(d,k,tx,ty): as above, always inside limits, then round.
+9.3 View and grid
+First #hand bounding box sets W = max(bb.w, bb.h) / 0.75.
+While drag is set, freeze viewBox at its current value.
+Otherwise recenter on bb center: x0 = bb.x+bb.w/2 - VW/2, y0 = bb.y+bb.h/2 - VH/2, set viewBox, mark gridDirty = true.
+VW/VH preserve aspect from W.
+Grid renders only when gridDirty. ResizeObserver sets gridDirty=true and draws.
+Draw is partial: first time svg.innerHTML = grid+hand, after that only #hand innerHTML. Skip getBBox while dragging.
+Controls
+Hand group: Pose select + name input + Save/Delete + Export/Import textarea. Expert unlock. Wrist -180..180°. Splay -100..100%. Bird tilt -30..30°. Toggles: Knuckle overlap, Scale widths, Show palm boxes. Buttons: Reset (def + refresh + sync + draw) and Mirror left/right (wrist,splay,thumb,tilt,rot,fs all negated).
+Per-finger groups in order: index, ring, pinky, thumb, middle. Each:
+If not middle: Splay added to hand splay -100..100%.
+Rotation -90..90 clamped to rRange.
+Curl (all joints): average of cj[0..n-2], range -20..chi where chi=80 thumb else 90.
+Details "Joint curls": Knuckle / Middle joint / Tip joint each -90..90 clamped -20..chi.
+slider() makes a range + number pair, clamp = min(expert?max:hi, max(expert?min:lo, round(v))), clampers and sync hooks keep Expert consistent.
+Footer notes: reachable lengths and the rules paragraph verbatim.
+Performance (smallest package, unchanged file size)
+SUM precomputed once. knOvl hoisted per chain/jointPos.
+R and norm hoisted.
+RAF throttle on pointermove. cachedCTM per drag.
+Draw: partial #hand update, skip getBBox while dragging, W cached, grid once via gridDirty.
+No DOM-retain rewrite. Stays single-file ~17k.
+File contract (so rebuilds stay consistent)
+One HTML file. All CSS in <style>, all JS in one <script>. No fetches, no imports, no external images.
+IDs and classes exactly as in §8 / §9. Key *** and pose shape exactly as in §7.
+Any builder following this text produces same constants, same data-j = min(i+1, n-2) shaft mapping, same limits, same RAF/cache/draw/view rules, so poses and screenshots match.
+Build log
+Phase 0 audit: bone had no data-j so shaft drag hit closest[data-d] → splay instead of IK; draw did innerHTML + getBBox + grid each move; sync/clampers double-clamped. Done 2026-10-22.
+Phase 1: shaft hit rect per bone, full buff, tip-driven IK. 16731 bytes. Done.
+Phases 2-3: smallest-package perf+cleanup. SUM, knOvl, partial draw + freeze + gridDirty, RAF + cachedCTM, jointPos hoist. Done — final.html 17255 bytes.
+Phase 4: this concept (reads like code, atomic). Paste-ready for the Doc. Push deferred to end (gog has no doc update — manual paste).
+
+----------------------------------------
+
+----------------------------------------
+
+"The top joint and bottom joint, exact center, represents the length of the invisible pyxl around it (A square, centered horizontally on long objects and vertically on wide ones."
+"The shapes represent the indo skeleton. The pyxl is the exo."
+"Joint is at the halfway point on the x of the bottom-most line."
+
+Stack — Z order (bottom → top)
+
+z=0  10×10 field (backdrop) — 1000×1000 @100px/pyxl
+     Truly invisible. Faintest blurred line only as impression.
+     Extremes may stretch to this field.
+  ↓ 1 pyxl margin
+z=1  8×8 default square — 800×800
+     Almost invisible. One ghosted step above field.
+     The hand in balanced state.
+  ↓
+z=2  In-between — reserved for future layers
+  ↓
+z=3  Mask / bone shape — indo skeleton
+     Visible. What remains when z=0 + z=1 disappear.
+
+z
+	layer
+	size
+	role
+	visibility
+
+0
+	Pyxl field (backdrop)
+	10×10 = 1000×1000
+	Exo / pinboard — per-bone pyxl squares (100×100 etc) + 10×10 field they sit on
+	Truly invisible — faintest blur
+
+1
+	8×8 default square
+	8×8 = 800×800
+	Hand — balanced centered frame
+	Almost invisible — ghosted
+
+2
+	In-between
+	—
+	Reserved
+	Optional
+
+3
+	Mask (shape)
+	100×H inside pyxl
+	Indo skeleton — bone visual
+	Visible
+
+Production: z=0 + z=1 ghosted/invisible → z=3 remains.
+Diegetic: z=0 or z=1 may appear as story element (graph paper, pinboard, framing device).
+
+Pyxl geometry
+
+1 pyxl = 100×100 square at z=0.
+Length = distance between top joint and bottom joint. Exact center between them.
+Long objects (fingers vertical): pyxl centered horizontally. Wide objects: centered vertically.
+Joint = halfway on X of bottom-most line, bottom edge. joint = (X_center, y_bottom).
+Green = small parent joint (plug, z=3 nub on isolated asset) → snaps into empty/black cutout (socket, z=3 outline) of piece below.
+Red = bottom of whole hand — metacarpal base at wrist (0,0) where all pieces meet (z=0→z=3 tie).
+
+For bone at local X0, bottom at y_base, height H (100/200/400):
+
+top_joint    = (X0, y_base − H)
+bottom_joint = (X0, y_base)                          ← halfway X, bottom edge, z=2→z=3 seam
+pyxl (z=0)   = [X0−50, X0+50] × [y_base−H, y_base]    ← H=100 → 1 square; H=200 → 2 stacked; H=400 → 4 stacked
+pyxl_center  = (X0, y_base − H/2)                     ← z=0 center
+mask (z=3)   = indo shape INSIDE pyxl, centered horizontally, bottom edge ↔ bottom_joint
+
+Origin: 0,0 at wrist — where all metacarpals meet. z=1 bottom of 8×8 / z=0 bottom of 10×10. Fingers up = −y.
+
+----------------------------------------
+II. THE PYXL — THE RULE YOU SET
+A. Backdrop & hand
+Backdrop (field, z=0) = 10×10 = 1000×1000 px @100px/pyxl (500×500 @50px/pyxl in this 2000 doc) — truly invisible. Faintest blurred line only. Extremes may stretch to this field.
+Default square (z=1) = 8×8 = 800×800 px — the hand. Almost invisible (one ghosted step above field, still not solid).
+Backdrop rect (local): x −500→+500, y −900→+100 (y up = negative; wrist 0,0 = bottom of hand square at z=1, also bottom of field at z=0, centered)
+Hand rect: x −400→+400, y −800→0 — 1 pyxl inset inside backdrop each side + top/bottom. Splayed thumb→pinky ~8.5–9 bleeds into z=0 margin toward extremes.
+       · · · · · · · · · · · · ·   y=+100 — z=0 field edge (truly invisible, faintest blur)
+        ·  ┌───────────────────┐  ·
+        ·  │ 1 pyxl margin      │  ·
+y=  0 ──●──┼── wrist (0,0) RED ─┼──●──  z=1 bottom of 8×8 default / z=0 bottom of 10×10 field
+        ·  │                    │  ·   8×8 default (z=1, almost invisible)
+        ·  │  8×8 hand (800)    │  ·   Meta400+Prox200+Mid100+Dist100 at z=3 over z=0 squares
+        ·  │                    │  ·
+y=-800 ──●──┼── tip line ───────┼──●──
+        ·  │ 1 pyxl margin      │  ·
+        ·  └───────────────────┘  ·
+        · · · · · · · · · · · · ·   y=-900 — z=0 field edge (invisible)
+           x─500  x─400    x+400  x+500
+           └─z=0 10×10 field (extremes)─┘
+             └─z=1 8×8 default ─┘
+
+B. Bone sizes — exact, W=100 uniform (perfectly balanced, all at z=3 over z=0 squares)
+bone
+	W
+	H
+	pyxels (z=0)
+	stack position (X0=0, middle)
+
+Distal / Thumbtip
+	100
+	100
+	1×1
+	y −800→−700 → joint −700 (green, z=3) → z=0 center −750
+
+Middle / Midthumb
+	100
+	100
+	1×1
+	y −700→−600 → joint −600 (green) → center −650
+
+Proximal
+	100
+	200
+	2×1
+	y −600→−400 → joint −400 (green) → center −500
+
+Metacarpal / Thumbcarpal
+	100
+	400
+	4×1
+	y −400→0 → joint 0 (RED, z=1/z=0) → center −200
+
+Hand total
+	—
+	800
+	8
+	tip −800 → wrist 0
+Rule preserved exactly: Metacarpal 400 = Prox 200 + Mid 100 + Dist 100. All W=100 in balanced state.
+Middle finger at X0=0:
+y=-800 ● tip (z=3)
+       │ Distal 100×100 over z=0 square [−50,+50]×[−800,−700]
+y=-700 ● green
+       │ Middle 100×100 over [−50,+50]×[−700,−600]
+y=-600 ● green
+       │ Proximal 100×200 (2 pyxels) over [−50,+50]×[−600,−400]
+y=-400 ● green
+       │ Metacarpal 100×400 (4 pyxels) over [−50,+50]×[−400,0]
+y=   0 ● RED wrist (0,0) — z=1/z=0
+
+C. Spawn — centered, odd + even simultaneously
+Hand width 8 inside 10 → S=2.0 pyxl (200px) z=1; exploded splayed layout S=4.0 (400px) uses z=0 margins.
+digit
+	Hand (S=2.0) X0 (pyxl)
+	Hand X0 (px)
+	Exploded (S=4.0) X0 (pyxl)
+
+pinky
+	−4.0
+	−400
+	−8.0
+
+ring
+	−2.0
+	−200
+	−4.0
+
+middle
+	0.0
+	0
+	0.0
+
+index
+	+2.0
+	+200
+	+4.0
+
+thumb
+	+4.0 (+50 half → +4.5 uses z=0 margin)
+	+400 → +450
+	+8.5
+12-sub lattice (1 pyxl = 12 sub, LCM 2/3/4/6) → center 0 is simultaneously ON-finger (odd n) and BETWEEN-fingers (even n).
+Balanced: ring/index/pinky are copies of middle — differences via creativity (imbalance at z=3) later.
+D. Scale dual
+context
+	px per pyxl
+	Distal
+	Backdrop (z=0)
+	Hand (z=1/z=3)
+
+Canonical (4000 spec)
+	100
+	100×100
+	1000×1000
+	800×800
+
+This Procreate doc (2000)
+	50
+	50×50
+	500×500
+	400×400
+E. Visibility — Z order
+Production: z=0 field + z=1 default ghosted/invisible → z=3 bone/mask remains.
+Diegetic: z=0 or z=1 may appear as story element (graph paper, pinboard, framing device).
+Imbalance via creativity — extremes stretch toward z=0 field; z=1 8×8 is the balanced state that makes both odd and even valid at 0,0.
+III. THE NUMBERS — EXACT 100 MATH (balanced state)
+A. Backdrop & hand
+Backdrop (field) = 10×10 pyxels = 1000×1000 px @100px/pyxl (500×500 @50px/pyxl in this 2000 doc) — truly invisible. Faintest blurred line only as impression. This is the field that extremes may stretch to.
+Default square = 8×8 pyxls = 800×800 px — the hand. Almost invisible (one step more visible than backdrop, still ghosted).
+Backdrop rect (local): x −500→+500, y −900→+100 (y up = negative; wrist 0,0 = bottom of hand square, center of backdrop bottom edge).
+Hand rect: x −400→+400, y −800→0 — 1 pyxl inset inside backdrop on each side + top/bottom. Splayed thumb→pinky ~8.5–9 bleeds into margin toward extremes field.
+
+        · · · · · · · · · · · · ·   y=+100 — 10×10 field edge (truly invisible, faintest blur)
+        ·  ┌───────────────────┐  ·
+        ·  │ 1 pyxl margin      │  ·
+y=  0 ──●──┼── wrist (0,0) RED ─┼──●──  all metacarpals meet = bottom of 8×8 default
+        ·  │                    │  ·   8×8 default square (almost invisible)
+        ·  │  8×8 hand (800)    │  ·   Meta400+Prox200+Mid100+Dist100
+        ·  │                    │  ·
+y=-800 ──●──┼── tip line ───────┼──●──
+        ·  │ 1 pyxl margin      │  ·
+        ·  └───────────────────┘  ·
+        · · · · · · · · · · · · ·   y=-900 — field edge (invisible)
+           x─500  x─400    x+400  x+500
+           └─10×10 field (extremes)─┘
+             └─ 8×8 default ─┘
+B. Bone sizes — exact, W=100 uniform (perfectly balanced)
+
+bone
+	W
+	H
+	pyxels
+	stack position (X0=0, middle)
+
+Distal / Thumbtip
+	100
+	100
+	1×1
+	y −800→−700 → joint −700 (green) → center −750
+
+Middle / Midthumb
+	100
+	100
+	1×1
+	y −700→−600 → joint −600 (green) → center −650
+
+Proximal
+	100
+	200
+	2×1
+	y −600→−400 → joint −400 (green) → center −500
+
+Metacarpal / Thumbcarpal
+	100
+	400
+	4×1
+	y −400→0 → joint 0 (RED) → center −200
+
+Hand total
+	—
+	800
+	8
+	tip −800 → wrist 0
+
+Rule preserved exactly: Metacarpal 400 = Prox 200 + Mid 100 + Dist 100.
+
+Middle finger example at X0=0:
+y=-800 ● tip
+       │ Distal 100×100
+y=-700 ● green
+       │ Middle 100×100
+y=-600 ● green
+       │ Proximal 100×200 (2 pyxels)
+y=-400 ● green
+       │ Metacarpal 100×400 (4 pyxels)
+y=   0 ● RED wrist
+C. Spawn — centered, odd + even simultaneously
+Hand width 8 pyxls inside 10 backdrop → uses S=2.0 pyxl (200px); exploded splayed layout uses S=4.0 (400px) in margins.
+
+digit
+	Hand (S=2.0) X0 (pyxl)
+	Hand X0 (px)
+	Exploded (S=4.0) X0 (pyxl)
+
+pinky
+	−4.0
+	−400
+	−8.0
+
+ring
+	−2.0
+	−200
+	−4.0
+
+middle
+	0.0
+	0
+	0.0
+
+index
+	+2.0
+	+200
+	+4.0
+
+thumb
+	+4.0 (+50 half → +4.5 uses margin)
+	+400 → +450
+	+8.5
+
+12-sub lattice (1 pyxl = 12 sub, LCM 2/3/4/6) → center 0 is simultaneously ON-finger (odd n) and BETWEEN-fingers (even n).
+Balanced: ring/ring/index/pinky are copies of middle — differences via creativity (imbalance) later.
+D. Scale dual
+
+context
+	px per pyxl
+	Distal
+	Backdrop
+	Hand
+
+Canonical (4000 spec)
+	100
+	100×100
+	1000×1000
+	800×800
+
+This Procreate doc (2000)
+	50
+	50×50
+	500×500
+	400×400
+
+E. Visibility
+Production: pyxl field + 8×8 default invisible/ghosted → bone/mask remains.
+Diegetic: either may appear as story element (graph paper, pinboard, framing device).
+Imbalance will come from creativity — extremes stretch toward 10×10 field; default 8×8 is the balanced centered state that makes both odd and even math valid at 0,0.
+IV. ASSETS INDEX
+canvas_outline.png — 1024×1024 thumbnail of 2000 canvas. Large outline at z=3; cutout at ~111–168 × 482–577 is the z=3 socket (empty/black). Backdrop z=0/z=1 below.
+brush_composite.png — four Shape.png stamps composited at z=3.
+3116BA74-…_Shape.png → Distal (z=3 over 100×100 z=0)
+472E2665-…_Shape.png → Middle (z=3 over 100×100 z=0)
+9A100C80-…_Shape.png → Proximal (z=3 over 100×200 z=0)
+2FDF29E8-…_Shape.png → Metacarpal (z=3 over 100×400 z=0)
+Originals at handpiece_render/ (_Shape.png + _QuickLook_Thumbnail.png + doc_Thumbnail.png) — z=0 pyxl squares implied
+
+----------------------------------------
+Gotz.Puppyt — Prototype 2 Spec Sheet (from old Doc 1i-4t5F…)
+Status: draft road map — Brad fills in his words, Bitruvi scaffolds
+P1: Prototype 1 (single-file HTML you sent 2026-10-25) — reference only
+P2: Rebuild from Brad's head, not from the code's assumptions
+
+----------------------------------------
+How to use this doc
+This is the Bible. Code follows this, not the other way around.
+Each phase = one bounded exercise. Do it, sign it off, then next.
+You write the Intent line in your own words. That's the efficacy test.
+I handle the scaffolding, versioning, and routing to the build.
+
+----------------------------------------
+Road map: 1 → 2 → 3.A–3.H → 4
++ Phase 5 (audit issues) is not a separate phase — each issue is pinned to where it gets fixed.
+
+[1] Purpose (YOUR words)
+  ↓
+[2] Canonical Rules (YOUR numbers, locked)
+  ↓
+[3.A] Stage & Interaction ─┬─ [3.B] Finger Rig
+                           ├─ [3.C] Poses
+                           ├─ [3.D] Visual
+                           ├─ [3.E] Builds
+                           ├─ [3.F] Stills
+                           ├─ [3.G] Animation
+                           └─ [3.H] State & History
+  ↓
+[4] Ship & Revise Loop (stay exactly where you want it)
+
+----------------------------------------
+
+Phase 1 — Purpose (in your words) ✅ 2026-10-25 — rev. 2026-10-25 19:51 UTC
+
+Brad's intent — verbatim (typo/punctuation only):
+
+This is a 2D cardboard cutout rig of the human hand. It comes from years of experimentation on how to transfer Lotte Reiniger's analog aesthetics to the digital age and actually pay respect to the process too, because I am tired of apps with shortcuts that make things worse, that require more knowledge of the code than the art, hidden behind paywalls that require monthly fees. That is my justification for artists using AI tools not to create their art, but to create the tools they want but do not have. Its future use cases go far beyond my own, so I simply want it viewed as this: a clean, fully rotational hand model preloaded with strong rules and constraints to keep it posing where the user wants, intuitively. A successful app is wholly poseable so that an artist could use it for reference and an animator could use it for pose-to-pose. We have the features to do certain parts of that in-app, but at this stage, posing is most important, with the exports working being our primary goal. More specifically, we want to treat the code and my lack of coding knowledge as mnemonic devices that focus less on AI as a generative tool and more as a translator of my ideas where I can feed any assets, movies, sound into it later so as not to steal from others.
+
+P1 purpose as shipped: parametric 2D hand poser, geometric not skeletal, for repeatable poses → stills/sequences.
+Not this tool if: a drawing/painting app, or a loose rig without locked limits and rules — and not an AI generator that makes the art for you.
+
+Accept: Phase 1 signed (rev). Efficacy check = does P2 pose the 5-fingerpiece cardboard hand reliably with constraints, for reference and pose-to-pose, as a tool the artist owns?
+
+Fixes from §5 here: kill the "hand poser vs drawing app" scope creep at the root — locked by Brad's words above.
+Phase 2 — Canonical Hand (lock the math)
+Gotz base is now canonical. Doc push failed (broken pipe — transient, not our file). Phase 2 below — paste only this.
+
+Where to paste in Gotz.Puppyt:
+
+Find heading Phase 2 — Canonical Hand (lock the math)
+Select that heading through the line before Phase 3.A — Stage & Interaction
+Delete that selection
+Paste this block (plain text)
+
+----------------------------------------
+
+PASTE — Phase 2 only:
+Phase 2 — Canonical Hand (lock the math) ✅ Gotz.Puppyt theflibbertigibbet/Gotz.Puppyt @040b9da — rebased 2026-10-25 23:02 UTC + Brad 23:02 UTC 6 answers
+Base: Gotz.Puppyt/src/rig/core.ts (commit 040b9da). Previous cafeetc/Pyxl.Papyr + handpiece.json archived as reference only.
+
+Units — single pyxl scale:
+1 pyxl = 100px · canvas 20×20 pyxl = 2000×2000 px · origin anchor_center · axis x right, y up
+No hand/rig dual conversion. Distal center is (0,0) anchor.
+
+BONES — as shipped in core.ts (adopted per answer 2):
+
+Digit
+	BONES [M, P, Mid, D]
+	SUM
+	KN (23:02)
+	Width wid()
+	LIM
+	rRange default (Controlled)
+
+middle (Bird master)
+	[4, 2, 1, 1]
+	8
+	0.05
+	0.75
+	0
+	±4°
+
+ring
+	[3.75, 1.875, 0.9375, 0.9375]
+	7.5
+	0.05
+	0.75×7.5/8 = 0.703
+	+30
+	±8°
+
+index
+	[3.75, 1.875, 0.9375, 0.9375]
+	7.5
+	0.05
+	0.75×7.5/8 = 0.703
+	−30
+	±6°
+
+pinky
+	[3.5, 1.75, 0.875, 0.875]
+	7
+	0.05
+	0.75×7/8 = 0.656
+	+90
+	±11°
+
+thumb
+	[2, 1, 1, 1] (4 bones)
+	5
+	0.05
+	0.75×0.9 = 0.675
+	−120
+	±75°
+
+KN → 0.05 all (was 1 / 0.5) — implements 5px buffer: 100px functional + 5px buffer = 105px physical per joint; split 2.5 anchor intrusion + 2.5 joint + outline remainder (Q4/Q6 geometry, kept as intent).
+wid(d) KEEP Gotz: 0.75×SUM/8 (thumb ×0.9), wscale multiplies (SUM−KN)/7 when on — answer 3.
+reach(d) = SUM − KN (e.g. middle 7.95, ring 7.45) — deductible KEEP for kinematics — answer 6.
+BEND thumb −1 else +1; cRange −20:90 (thumb 80), expert −90:90.
+rRange — default Controlled VERY RIGID ±4(mid) ±6(idx) ±8(ring) ±11(pinky) ±75(thumb); fullElasticity = free ±45 (thumb60); expert = ±90 — answer 5 via applyMetacarpalProgressiveStep.
+Chain/hub: wrist virtual bottom of Bird Metacarpal [0, −7.0] functional, all roots share it — LOCKED 2026-10-13.
+ViewBox py −1 −8 2 9 / px −100 −800 200 900.
+
+Brad’s answers ✅ 23:02 UTC (verbatim, 6 on Gotz feed):
+
+Keep as 4.
+   → KEEP thumb 4 [2,1,1,1] SUM5.
+Adopt the app’s.
+   → KEEP [3.75,1.875,0.9375,0.9375] SUM7.5 each.
+Keep it as it was before.
+   → KEEP wid() 0.75×SUM/8.
+Yes. Apply it.
+   → APPLIED KN 0.05 all.
+Yes default controlled.
+   → default = Controlled (±4/6/8/11), fullElasticity = free, expert = ±90.
+Keep it. Kinematics are important.
+   → KEEP SUM−KN kinematics.
+
+Accept: Phase 2 locked 23:02 UTC. Live in Gotz.Puppyt/src/rig/core.ts (KN 0.05). Earlier Q1–Q10 + .95 norm queued then dropped per answers 2/3 — see history below.
+
+<details><summary>History — earlier 22:37 UTC Q1–Q10 + intermediate .95 norm (superseded)</summary>
+
+Q1 4 2 1 1 stays. Q2 .75/.66 Q3 cut deductible Q4 100+5=105 Q5 carpal=Prox2 Q6 2.5+2.5 Q7 hub keep Q8 Controlled+10° Q9 keep limits Q10 keep units.
+Intermediate 22:43 UTC queued .95 norm [3.8,1.9,.95,.95] SUM7.6 + flat .75/.66 + splay33→10° — dropped 23:02 UTC by answers 2/3.
+</details>
+
+Fixes from §5 here: standard naming, thumb special-casing, wscale/boxes → resolved; deductible kept only for kinematics.
+
+----------------------------------------
+Phase 3.A — Stage & Interaction ✅ 2026-10-27 20:08 UTC — LOCKED (Q1–Q5)
+
+Brad's intent — verbatim (5 answers, one per handle):
+
+Give it about 75 degrees on each side, but a toggle can unlock 360. A tight fit.
+If in whole IK, Metacarpal should have slight flexibility and be able to mirror easily. About 150 degrees rotation on each finger. Thumb and pinky metacarpals can stretch further out than the rest, as they largely set the hand shape.
+Allow pinning. Bone drag should mimic mechanics or finger bones with more flexibility. (360 is always possible in the app but it is toggled off by default)
+Joint limits should be baked in but toggleable in the app. All numeric posing values should have manual toggles, slides, and click/drag. IK should be toggleable on each finger, and a whole IK mode should be possible where the bone we drag guides the whole hand as it would in reality (just more flexible if constraints are wide or off).
+Hand should always be centered, never jitter. if rotation occurs at wrist, the canvas should stay clean, sole exception being if full flexibility is on and the user rotates beneath the current limits, then the canvas camera should slide down with it and take it off the top.
+Drop split if that will improve performance.
+
+Locked spec:
+Wrist hub: tight hit r≈0.2 (fingers win), default ±75° each side = 150° total, toggle unlocks ±180° (360°). Wrist is g[data-w] front but small.wrist slider [-75,75] default → [-180,180] on Expert/fullElasticity. Mirror negates wrist.
+Finger base / metacarpal: slight flexibility via applyMetacarpalProgressiveStep (compliance 0.08 fingers / 0.24 pinky / 0.65 thumb), ~150° per finger ±75° baseline, thumb ±90° + pinky [-24,+90] stretch further — they set hand shape. Mirrors via negate rot[d]. rRange moves from Phase 2 ±4/6/8/11 → ±75 all, thumb/pinky extended.
+Bone/joint + solver: joint dot = pin that knuckle (data-j=i, r 0.16 + tip 0.18, data-hit=joint/tip), stays clamped cRange -20:90 (thumb 80). Bone rect = tip-driven IK mimicking real finger mechanics but more flexible (CCD 14 iters, dl=atan2(cross,dot)/R, clamp each step cRange/rRange, then round), data-hit=bone x -w/2-0.08 y yTop+0.16 w+0.16 h max(0.1,h-0.32) centered between pins, never overlap. 360° always possible, toggled off by default → Expert lifts to ±90. All numerics have 3 access: toggle + slider + click/drag. Per-finger IK ikPerFinger[d] bool (default true) + whole-hand IK wholeIk bool (default false) — when wholeIk, dragged bone guides whole hand (handMarkup walk all fingers), flex scales with constraints.
+Viewport framing: always centered, never jitter. W = max(bb.w,bb.h)/0.75 locked after first measure, reused while dragging. viewBox recenters x0 = bb.x+bb.w/2 - VW/2, y0 = bb.y+bb.h/2 - VH/2 only when drag==null. Frozen while drag — skip getBBox while dragging, keep viewBox. wrist rotation = clean canvas, no reframe. Exception: expert/fullElasticity on and wrist < -75 beneath limits → camera slides down (y pan) so hand goes off top but stays visible. RAF coalescing + cachedCTM per drag (inverse cached on pointerdown, refresh only on resize), gridDirty gates grid rebuild, ResizeObserver marks dirty only on still reframe. vector-effect:non-scaling-stroke grid kept.
+Split: dropped for performance. Retire .stage 66.667% + .split 16px ns-resize (20–85%, dblclick reset) + innerHeight calc. Use header fixed + minimized transform, stage absolute inset:0 full-bleed, controls as overlay/drawer. No thrash on split drag. filmBlur .0055 + ghostBlur .02 stays on #hand only, not grid.
+
+Accept: interaction spec with sizes + one feel sentence per handle — Gotz W/cachedCTM/gridDirty/raf + tight hits + frozen viewBox are the thrash fixes. Phase 3.A signed 20:08 UTC.
+
+Fixes from §5 here: inv stale → cachedCTM refresh-on-resize rule, pend race → raf batching, frozen brittleness → drag-gated viewBox lock, filmBlur cost → kept on hand only + ghostBlur for onion, hit overshoot → tight 0.16/0.18 centered, innerHeight split → dropped (full-bleed).
+
+----------------------------------------
+Phase 3.B — Finger Rig Controls
+Exercise 3.B: What knobs actually need to exist.
+
+Your words:
+How many ways to curl? (P1 had 4) Pick ONE or TWO: _____
+Which sliders survive? Wrist / Splay / Tilt / per-finger Rot / Curl(all) / 3 joints: _____
+Expert mode: what does -90:90 really mean to you?
+
+Checklist:
+[ ] Deduplicate Wrist (P1 had 4 writers) → one source
+[ ] Deduplicate Splay (P1 had 3 + per-finger adds) → one source
+[ ] Decide +15 / -15 buttons fate (keep as nudge or delete)
+[ ] middle is bird/master — does it get special UI or same as others?
+[ ] cRange/rRange per digit locked in Phase 2, not re-derived here
+
+Accept: knob list with count. If > 3 ways to do same curl, cut.
+
+Fixes from §5 here: wrist×4, splay×3, curl×4 redundancies; Controls order quirk; stale morph base.
+
+----------------------------------------
+Phase 3.C — Pose Library
+Exercise 3.C: How poses live.
+
+Your words:
+Quick poses vs Library list — one or both? _____
+Saved pose naming rule: _____
+JSON import/export: who needs it? _____
+
+Checklist:
+[ ] Single pose picker (no Quick 8 + Library + chips triple)
+[ ] Chips All/Canonical/Custom — keep or simplify to 2?
+[ ] $name auto-Pose N collision fixed
+[ ] Delete guards canonical vs custom
+[ ] Search hit() scope decided
+
+Accept: one pose access path drawn.
+
+Fixes from §5 here: quick×library duplication, sel highlight mid-glide, auto-name collision.
+
+----------------------------------------
+Phase 3.D — Visual System
+Exercise 3.D: How it looks.
+
+Your words:
+Skin art vs boxes vs both — when? _____
+Bend arrows: what do lime/red mean to you? _____
+Theme: dark only / both? _____
+
+Checklist:
+[ ] skin vs boxes vs wscale interaction matrix written
+[ ] box rect uses CSS not dasharray attribute bug
+[ ] buff overlap rect only when art off
+[ ] Legend for bend colors in UI
+[ ] Theme button labeled (not just ☀/☾)
+
+Accept: visual mode table.
+
+Fixes from §5 here: boxes/wscale/skin mismatch, bend legend missing, theme cryptic.
+
+----------------------------------------
+Phase 3.E — Builds
+Exercise 3.E: Hand variants.
+
+Your words:
+Which builds matter? Full / Claw / Trident / Mickey's — cut any? _____
+
+Checklist:
+[ ] One picker only (header OR cycler, not both)
+[ ] IDs standard/mickey/trident/claw renamed if you want clearer
+[ ] .off dim vs hide — which?
+[ ] Mickey's label vs id consistency
+
+Accept: build list final.
+
+Fixes from §5 here: 5 build controls for 4 builds, cycler cryptic, .off still interactive.
+
+----------------------------------------
+Phase 3.F — Still Export
+Exercise 3.F: Saving a picture.
+
+Your words:
+PNG 1024² transparent — still right? _____
+SVG: who uses it? _____
+
+Checklist:
+[ ] One PNG path (Space + button converge)
+[ ] CompressionStream feature-detect, disable with message on Safari/Firefox
+[ ] measure → viewBox → render pipeline extracted, not inline
+[ ] #snaps card: Save works everywhere, Copy gated to secure context
+[ ] Filename stem single source
+
+Accept: one still export spec.
+
+Fixes from §5 here: custom PNG encoder maintenance, CompressionStream assumption, clipboard fail toast, dual PNG paths.
+
+----------------------------------------
+Phase 3.G — Pose-to-Pose Animation
+Exercise 3.G: Moving between poses.
+
+Your words:
+Filmstrip 6 frames — right count? _____
+Preview should it be destructive (commit on click) or safe? _____
+Which encoders matter? GIF / APNG / ZIP — cut any? _____
+
+Checklist:
+[ ] Filmstrip preview NON-destructive (apply on explicit commit only)
+[ ] frameIdx lifecycle defined (no overwrite + immediate commit)
+[ ] From/To defaults not jumping (Fist/Neutral)
+[ ] Duration/FPS bounds set, progress bar single source
+[ ] Memory guard: n×512² cap (warn/disable large dur×fps)
+[ ] Drop custom LZW/APNG if native toBlob covers — pick one lib
+
+Accept: animation spec with destructive/safe choice signed.
+
+Fixes from §5 here: filmstrip hijack, morph base stale, custom GIF/APNG encoders, OOM on 120 frames, gliding half-state commit.
+
+----------------------------------------
+Phase 3.H — State, History & Persistence
+Exercise 3.H: How the app remembers.
+
+Your words:
+Undo/redo — where should the buttons live? _____
+localStorage — what survives a refresh? _____
+
+Checklist:
+[ ] One undo/redo location (not header + toolbar)
+[ ] hist reducer (no mutable S god object) — commit boundaries explicit
+[ ] glide vs commit ordering: glide does NOT commit half-state on cancel
+[ ] S immutability: copy() at reducer boundary only
+[ ] sync[] pub/sub removed → explicit render pass
+[ ] localStorage key pyxl.hand.v2 versioned, *** legacy explained or dropped
+[ ] syncRev/savedRev removed — derived from state
+[ ] Keyboard: Space/Ctrl+Z gated correctly (no snap while typing), repeat ignored consistently
+
+Accept: state diagram (S → render → persist → history) drawn.
+
+Fixes from §5 here: god object S, sync[] growth/order, hist half-state, syncRev ghost, legacy *** key, keyboard bubbling, activeElement guard.
+
+----------------------------------------
+Phase 4 — Ship & Stay Where You Want It
+Exercise 4: The revision loop YOU will use.
+
+Your words:
+Where does the spec live? (this doc = Bible): _____
+How will you make P3, P4, … ? _____
+
+Loop:
+You write Intent line (your words) for the change
+Together mark which 3.x it touches, update this doc first
+Then code — one exercise at a time, bounded task
+Sign off with a screenshot/test + spec version bump
+Route assets via standard asset pipeline (Drive / cloud storage) — no parallel tracking
+
+Checklist:
+[ ] This doc is GOOGLE DOC = BIBLE source (mirror to Drive canonical)
+[ ] Version tag per phase: P2-3A, P2-3B, …
+[ ] Test gate: fit()/hit()/export proof per phase, not just "it looks right"
+[ ] Efficacy check: after each phase, can you point to the sentence YOU wrote that the code implements?
+
+Accept: loop in your words, one sentence per step.
+
+Fixes from §5 here: single-file IIFE → modular src/ (future), no tests → per-phase proof, channel routing structured properly.
+
+----------------------------------------
+Appendix — §5 Issue Map (where each fix landed)
+
+Issue
+	Pinned to
+
+Undo/Redo ×2, Build picker ×2, Wrist/Splay/Curl dup
+	3.B, 3.E, 3.H
+
+God object S, sync[], el/slider factories
+	3.H
+
+handMarkup string innerHTML, getBBox thrash, frozen flag
+	3.A, 3.H
+
+inv stale, pend race, split innerHeight
+	3.A
+
+filmBlur cost
+	3.A / 3.D
+
+Quick 8 + Library + Chips triple
+	3.C
+
+Auto-name collision, sel mid-glide
+	3.C, 3.H
+
+boxes/wscale/skin mismatch, bend legend, theme
+	3.D
+
+5 build controls, .off interactive
+	3.E
+
+Custom PNG/GIF encoders, CompressionStream, clipboard
+	3.F, 3.G
+
+Filmstrip destructive preview, morph stale base
+	3.G
+
+OOM 120 frames, glide half-state
+	3.G, 3.H
+
+IIFE single file, legacy *** key, keyboard, split
+	3.H, 4
+
+----------------------------------------
+Next step
+Brad: fill the YOUR P2 blanks above (one line each is enough). Reply with your Phase 1 + Phase 2 lines and I'll scaffold Phase 1 as the first bounded task.
+
